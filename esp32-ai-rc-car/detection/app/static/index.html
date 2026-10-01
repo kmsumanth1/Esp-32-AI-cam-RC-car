@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 AI RC Car</title>
+<style>
+  :root {
+    --ground: #18202e;
+    --panel: #212c3f;
+    --panel-raised: #2a374e;
+    --line: #36465f;
+    --text: #e9eef6;
+    --muted: #9aa9c0;
+    --signal: #ffc233;   /* hazard yellow: the active/pressed state */
+    --stop: #f0524d;
+    --ok: #4cc9b0;
+    --num: "Bahnschrift", "Roboto Condensed", "Arial Narrow", system-ui, sans-serif;
+    --body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--ground); color: var(--text); font-family: var(--body); }
+  body { min-height: 100vh; }
+
+  header { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+           padding: 0.9rem 1.25rem; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 1.05rem; font-weight: 600; }
+  #conn { display: flex; align-items: center; gap: 0.5rem; color: var(--muted); font-size: 0.9rem; }
+  #conn i { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--stop); }
+  #conn.online i { background: var(--ok); }
+
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 21rem; gap: 1.25rem;
+         padding: 1.25rem; max-width: 76rem; margin: 0 auto; }
+
+  .view { position: relative; aspect-ratio: 4 / 3; background: #0f1621; border: 1px solid var(--line);
+          border-radius: 6px; overflow: hidden; }
+  .view img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  #novideo { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+             padding: 2rem; text-align: center; color: var(--muted); line-height: 1.5; background: #0f1621; }
+  #novideo[hidden] { display: none; }
+
+  .readings { display: flex; flex-wrap: wrap; gap: 0.5rem 2.25rem; padding: 0.9rem 0.1rem 0; }
+  .readings div { display: flex; flex-direction: column; }
+  .readings dt { font-size: 0.8rem; color: var(--muted); }
+  .readings dd { margin: 0; font-family: var(--num); font-size: 1.6rem; line-height: 1.15; }
+  .readings small { font-size: 0.9rem; color: var(--muted); margin-left: 0.2rem; }
+
+  aside { display: flex; flex-direction: column; gap: 1.5rem; }
+  section h2 { margin: 0 0 0.6rem; font-size: 0.95rem; font-weight: 600; }
+
+  .segmented { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 6px;
+               overflow: hidden; }
+  .segmented button { background: transparent; color: var(--muted); border: 0; padding: 0.7rem; font: inherit; cursor: pointer; }
+  .segmented button[aria-pressed="true"] { background: var(--signal); color: #1b1b1b; font-weight: 600; }
+  .target { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.7rem; font-size: 0.9rem; color: var(--muted); }
+  .target input { flex: 1; min-width: 0; background: var(--panel); color: var(--text); border: 1px solid var(--line);
+                  border-radius: 6px; padding: 0.55rem 0.7rem; font: inherit; }
+
+  .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; max-width: 17rem; }
+  .pad button { aspect-ratio: 1; background: var(--panel-raised); color: var(--text); border: 1px solid var(--line);
+                border-radius: 8px; font-size: 1.7rem; cursor: pointer; touch-action: none; user-select: none; }
+  .pad button.down { background: var(--signal); color: #1b1b1b; border-color: var(--signal); }
+  .pad .stop { background: var(--stop); border-color: var(--stop); color: #fff; font-size: 1rem; font-weight: 700; }
+  .pad .gap { visibility: hidden; }
+  .hint { margin: 0.7rem 0 0; font-size: 0.85rem; color: var(--muted); line-height: 1.45; }
+
+  .speed { display: flex; align-items: center; gap: 0.8rem; margin-top: 1rem; max-width: 17rem; }
+  .speed input { flex: 1; accent-color: var(--signal); }
+  .speed output { font-family: var(--num); font-size: 1.2rem; min-width: 2.4rem; text-align: right; }
+
+  #dets { list-style: none; margin: 0; padding: 0; }
+  #dets li { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid var(--line); }
+  #dets li span:last-child { font-family: var(--num); color: var(--muted); }
+  #dets li.empty { display: block; color: var(--muted); border: 0; line-height: 1.45; }
+
+  button:focus-visible, input:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+
+  @media (max-width: 860px) {
+    main { grid-template-columns: 1fr; padding: 0.75rem; }
+    .pad, .speed { max-width: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>ESP32 AI RC Car</h1>
+  <div id="conn"><i></i><span id="conn-text">Connecting to server</span></div>
+</header>
+
+<main>
+  <div>
+    <div class="view">
+      <img id="video" src="/video" alt="Live camera view with detected objects outlined">
+      <div id="novideo">No video yet. Check that the ESP32-CAM is powered, on the same Wi-Fi as this computer, and that ESP32_HOST is set to its IP address.</div>
+    </div>
+    <dl class="readings">
+      <div><dt>Frame rate</dt><dd><span id="fps">–</span><small>fps</small></dd></div>
+      <div><dt>Control delay</dt><dd><span id="lat">–</span><small>ms</small></dd></div>
+      <div><dt>Drive mode</dt><dd id="mode-read">Manual</dd></div>
+    </dl>
+  </div>
+
+  <aside>
+    <section>
+      <h2>Drive mode</h2>
+      <div class="segmented" role="group" aria-label="Drive mode">
+        <button id="m-manual" aria-pressed="true">Manual</button>
+        <button id="m-follow" aria-pressed="false">Follow object</button>
+      </div>
+      <label class="target">Follow
+        <input id="target" list="classes" value="person" maxlength="32" aria-label="Object to follow">
+      </label>
+      <datalist id="classes">
+        <option value="person"><option value="bottle"><option value="cup"><option value="chair">
+        <option value="cell phone"><option value="backpack"><option value="dog"><option value="cat">
+      </datalist>
+    </section>
+
+    <section>
+      <h2>Drive</h2>
+      <div class="pad">
+        <span class="gap"></span>
+        <button data-dir="F" aria-label="Forward">&#8593;</button>
+        <span class="gap"></span>
+        <button data-dir="L" aria-label="Turn left">&#8592;</button>
+        <button data-dir="S" class="stop" aria-label="Stop">Stop</button>
+        <button data-dir="R" aria-label="Turn right">&#8594;</button>
+        <span class="gap"></span>
+        <button data-dir="B" aria-label="Backward">&#8595;</button>
+        <span class="gap"></span>
+      </div>
+      <div class="speed">
+        <label for="speed">Speed</label>
+        <input id="speed" type="range" min="80" max="255" value="170">
+        <output id="speed-out" for="speed">170</output>
+      </div>
+      <p class="hint">Hold a button to drive; let go to stop. Keyboard: W A S D or arrow keys, space to stop.</p>
+    </section>
+
+    <section>
+      <h2>Detected objects</h2>
+      <ul id="dets"><li class="empty">Nothing detected yet. Point the camera at a person, bottle or chair.</li></ul>
+    </section>
+  </aside>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let speed = 170, held = null, timer = null;
+
+async function post(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  return r.json();
+}
+
+const send = (direction) =>
+  post("/api/control", { direction, speed: direction === "S" ? 0 : speed }).catch((e) => showError(e.message));
+
+function showError(msg) { $("#conn-text").textContent = msg; $("#conn").classList.remove("online"); }
+
+function press(dir) {
+  if (held === dir) return;
+  release(false);
+  held = dir;
+  document.querySelector(`[data-dir="${dir}"]`)?.classList.add("down");
+  send(dir);
+  if (dir !== "S") timer = setInterval(() => send(dir), 150); // keeps the Uno failsafe fed
+  setMode("manual");
+}
+
+function release(sendStop = true) {
+  clearInterval(timer); timer = null;
+  document.querySelectorAll(".pad .down").forEach((b) => b.classList.remove("down"));
+  if (held && held !== "S" && sendStop) send("S");
+  held = null;
+}
+
+document.querySelectorAll(".pad button").forEach((b) => {
+  b.addEventListener("pointerdown", (e) => { e.preventDefault(); press(b.dataset.dir); });
+  ["pointerup", "pointerleave", "pointercancel"].forEach((ev) => b.addEventListener(ev, () => release()));
+});
+
+const KEYS = { w: "F", arrowup: "F", s: "B", arrowdown: "B", a: "L", arrowleft: "L", d: "R", arrowright: "R", " ": "S" };
+addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" && e.target.type === "text") return;
+  const dir = KEYS[e.key.toLowerCase()];
+  if (dir && !e.repeat) { e.preventDefault(); press(dir); }
+});
+addEventListener("keyup", (e) => { if (KEYS[e.key.toLowerCase()]) release(); });
+addEventListener("blur", () => release());
+document.addEventListener("visibilitychange", () => { if (document.hidden) release(); });
+
+$("#speed").addEventListener("input", (e) => { speed = +e.target.value; $("#speed-out").textContent = speed; });
+
+let currentMode = "manual";
+function setMode(mode) {
+  if (mode === currentMode) return;
+  currentMode = mode;
+  $("#m-manual").setAttribute("aria-pressed", mode === "manual");
+  $("#m-follow").setAttribute("aria-pressed", mode === "follow");
+  $("#mode-read").textContent = mode === "follow" ? "Following " + $("#target").value : "Manual";
+}
+$("#m-manual").onclick = () => post("/api/mode", { mode: "manual" }).then(() => setMode("manual")).catch((e) => showError(e.message));
+$("#m-follow").onclick = () =>
+  post("/api/mode", { mode: "follow", target: $("#target").value || "person" }).then(() => setMode("follow")).catch((e) => showError(e.message));
+
+async function poll() {
+  try {
+    const [s, d] = await Promise.all([fetch("/api/status").then((r) => r.json()), fetch("/api/detections").then((r) => r.json())]);
+    $("#conn").classList.add("online");
+    $("#conn-text").textContent = "Server connected, ESP32 at " + s.esp32_host;
+    $("#fps").textContent = s.fps ? s.fps.toFixed(1) : "–";
+    $("#lat").textContent = s.latency_ms == null ? "–" : Math.round(s.latency_ms);
+    $("#novideo").hidden = s.stream_connected;
+    currentMode = s.mode === "follow" ? "manual" : "follow"; // force setMode to refresh the buttons
+    setMode(s.mode);
+    $("#dets").innerHTML = d.length
+      ? d.map((x) => `<li><span>${x.label}</span><span>${Math.round(x.conf * 100)}%</span></li>`).join("")
+      : '<li class="empty">Nothing detected yet. Point the camera at a person, bottle or chair.</li>';
+  } catch {
+    $("#conn").classList.remove("online");
+    $("#conn-text").textContent = "Server unreachable. Is it still running?";
+  }
+}
+setInterval(poll, 700); poll();
+
+$("#video").addEventListener("error", () => setTimeout(() => { $("#video").src = "/video?t=" + Date.now(); }, 3000));
+</script>
+</body>
+</html>

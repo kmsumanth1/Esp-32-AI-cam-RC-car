@@ -1,0 +1,18 @@
+# secrets
+esp32_cam/secrets.h
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# local data and model weights
+*.db
+*.pt
+*.onnx
+
+# Arduino build output
+build/
