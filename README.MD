@@ -452,8 +452,3 @@ The ultimate goal of this project is to transform a conventional RC car into an 
 
 ---
 
-# 📄 License
-
-This project is intended for **educational, research, and personal development purposes**.
-
-Add an appropriate open-source license to the repository if you plan to make the project publicly reusable.
